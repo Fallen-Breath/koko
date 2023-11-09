@@ -13,6 +13,7 @@ import (
 	"github.com/jumpserver/koko/pkg/config"
 	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"github.com/jumpserver/koko/pkg/logger"
+	"github.com/jumpserver/koko/pkg/utils/sshhostkey"
 )
 
 type domainGateway struct {
@@ -138,7 +139,7 @@ func (d *domainGateway) createGatewaySSHClient(gateway *model.Gateway) (*gossh.C
 	sshConfig := gossh.ClientConfig{
 		User:            loginAccount.Username,
 		Auth:            auths,
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		HostKeyCallback: sshhostkey.CreateHostKeyCallback(), // fallen's fork: check ssh host key
 		Timeout:         configTimeout * time.Second,
 	}
 	port := gateway.Protocols.GetProtocolPort(model.ProtocolSSH)

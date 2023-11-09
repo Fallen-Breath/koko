@@ -12,6 +12,7 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/jumpserver/koko/pkg/logger"
+	"github.com/jumpserver/koko/pkg/utils/sshhostkey"
 )
 
 type SSHClientOption func(conf *SSHClientOptions)
@@ -166,7 +167,7 @@ func NewSSHClientWithCfg(cfg *SSHClientOptions) (*SSHClient, error) {
 		User:            cfg.Username,
 		Auth:            cfg.AuthMethods(),
 		Timeout:         time.Duration(cfg.Timeout) * time.Second,
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		HostKeyCallback: sshhostkey.CreateHostKeyCallback(), // fallen's fork: check ssh host key
 		Config:          createSSHConfig(),
 	}
 	destAddr := net.JoinHostPort(cfg.Host, cfg.Port)
