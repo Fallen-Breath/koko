@@ -136,7 +136,13 @@ func SSHClientKeyboardAuth(keyboardAuth gossh.KeyboardInteractiveChallenge) SSHC
 	}
 }
 
+// NewSSHClient fallen's fork: check ssh host key -- add param messenger, preserve original interface
 func NewSSHClient(opts ...SSHClientOption) (*SSHClient, error) {
+	return NewSSHClientWithMessenger(nil, opts...)
+}
+
+// NewSSHClientWithMessenger fallen's fork: check ssh host key -- add param messenger
+func NewSSHClientWithMessenger(messenger sshhostkey.Messenger, opts ...SSHClientOption) (*SSHClient, error) {
 	cfg := &SSHClientOptions{
 		Host: "127.0.0.1",
 		Port: "22",
@@ -144,7 +150,7 @@ func NewSSHClient(opts ...SSHClientOption) (*SSHClient, error) {
 	for _, setter := range opts {
 		setter(cfg)
 	}
-	return NewSSHClientWithCfg(cfg)
+	return NewSSHClientWithCfg(messenger, cfg)
 }
 
 var (
@@ -153,26 +159,32 @@ var (
 	ErrSSHClient   = errors.New("new ssh client failed")
 )
 
+// getAvailableProxyClient: fallen's fork: check ssh host key -- add param messenger, preserve original interface
 func getAvailableProxyClient(cfgs ...SSHClientOptions) (*SSHClient, error) {
+	return getAvailableProxyClientWithMessenger(nil, cfgs...)
+}
+
+// getAvailableProxyClientWithMessenger: fallen's fork: check ssh host key -- add param messenger
+func getAvailableProxyClientWithMessenger(messenger sshhostkey.Messenger, cfgs ...SSHClientOptions) (*SSHClient, error) {
 	for i := range cfgs {
-		if proxyClient, err := NewSSHClientWithCfg(&cfgs[i]); err == nil {
+		if proxyClient, err := NewSSHClientWithCfg(messenger, &cfgs[i]); err == nil {
 			return proxyClient, nil
 		}
 	}
 	return nil, ErrNoAvailable
 }
 
-func NewSSHClientWithCfg(cfg *SSHClientOptions) (*SSHClient, error) {
+func NewSSHClientWithCfg(messenger sshhostkey.Messenger, cfg *SSHClientOptions) (*SSHClient, error) {
 	gosshCfg := gossh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            cfg.AuthMethods(),
 		Timeout:         time.Duration(cfg.Timeout) * time.Second,
-		HostKeyCallback: sshhostkey.CreateHostKeyCallback(), // fallen's fork: check ssh host key
+		HostKeyCallback: sshhostkey.CreateHostKeyCallback(messenger), // fallen's fork: check ssh host key -- replace HostKeyCallback
 		Config:          createSSHConfig(),
 	}
 	destAddr := net.JoinHostPort(cfg.Host, cfg.Port)
 	if len(cfg.proxySSHClientOptions) > 0 {
-		proxyClient, err := getAvailableProxyClient(cfg.proxySSHClientOptions...)
+		proxyClient, err := getAvailableProxyClientWithMessenger(messenger, cfg.proxySSHClientOptions...) // fallen's fork: check ssh host key -- add param messenger
 		if err != nil {
 			logger.Errorf("Get gateway client err: %s", err)
 			return nil, err

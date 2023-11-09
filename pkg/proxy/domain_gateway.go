@@ -139,7 +139,7 @@ func (d *domainGateway) createGatewaySSHClient(gateway *model.Gateway) (*gossh.C
 	sshConfig := gossh.ClientConfig{
 		User:            loginAccount.Username,
 		Auth:            auths,
-		HostKeyCallback: sshhostkey.CreateHostKeyCallback(), // fallen's fork: check ssh host key
+		HostKeyCallback: sshhostkey.CreateHostKeyCallback(nil), // fallen's fork: check ssh host key
 		Timeout:         configTimeout * time.Second,
 	}
 	port := gateway.Protocols.GetProtocolPort(model.ProtocolSSH)
