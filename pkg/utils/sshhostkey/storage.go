@@ -17,21 +17,23 @@ func closeFileIgnoreError(f *os.File) {
 	_ = f.Close()
 }
 
-func getHostKey(filePath, hostname string) (ssh.PublicKey, error) {
+func getHostKey(filePath, hostname string) (ssh.PublicKey, int, error) {
 	hostKeyStoreMutex.RLock()
 	defer hostKeyStoreMutex.RUnlock()
 
 	file, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, 0, nil
 		}
-		return nil, err
+		return nil, 0, err
 	}
 	defer closeFileIgnoreError(file)
 
 	scanner := bufio.NewScanner(file)
+	lineno := 0
 	for scanner.Scan() {
+		lineno++
 		fields := strings.Split(scanner.Text(), " ")
 		if len(fields) != 3 {
 			continue // Skip lines that don't have three fields.
@@ -44,12 +46,12 @@ func getHostKey(filePath, hostname string) (ssh.PublicKey, error) {
 
 		key, _, _, _, err := ssh.ParseAuthorizedKey(scanner.Bytes())
 		if err != nil {
-			return nil, fmt.Errorf("invalid public key for host '%s': %v", host, err)
+			return nil, lineno, fmt.Errorf("invalid public key for host '%s' at line %d: %v", host, lineno, err)
 		}
 
-		return key, nil
+		return key, lineno, nil
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
 func addHostKey(filePath, hostname string, key ssh.PublicKey) error {

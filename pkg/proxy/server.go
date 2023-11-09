@@ -623,7 +623,21 @@ func (s *Server) getSSHConn() (srvConn *srvconn.SSHConnection, err error) {
 	if proxyArgs != nil {
 		sshAuthOpts = append(sshAuthOpts, srvconn.SSHClientProxyClient(proxyArgs...))
 	}
-	sshClient, err := srvconn.NewSSHClient(sshAuthOpts...)
+
+	// fallen's fork: check ssh host key -- store message lines
+	var connectionMessages []string
+	sshClient, err := srvconn.NewSSHClientWithMessenger(func(line string) {
+		connectionMessages = append(connectionMessages, line)
+	}, sshAuthOpts...)
+
+	// fallen's fork: check ssh host key -- send connection messages
+	for i, message := range connectionMessages {
+		if i == 0 {
+			utils.IgnoreErrWriteString(s.UserConn, "\r\n")
+		}
+		utils.IgnoreErrWriteString(s.UserConn, message+"\r\n")
+	}
+
 	if err != nil {
 		logger.Errorf("Get new ssh client err: %s", err)
 		return nil, err
