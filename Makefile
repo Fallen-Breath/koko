@@ -7,6 +7,8 @@ COMMIT := $(shell git rev-parse HEAD)
 GOVERSION := $(shell go version)
 CipherKey := $(shell head -c 100 /dev/urandom | base64 | head -c 32)
 
+IMAGE_TAG=latest
+
 BASEPATH := $(shell pwd)
 KOKOSRCFILE := $(BASEPATH)/cmd/koko/
 KUBECTLFILE := $(BASEPATH)/cmd/kubectl/
@@ -99,7 +101,7 @@ koko-ui:
 .PHONY: docker
 docker:
 	@echo "build docker images"
-	docker buildx build --build-arg VERSION=$(VERSION) -t jumpserver/koko:$(VERSION)-ce . --load
+	docker buildx build --build-arg VERSION=$(VERSION) -t fallenbreath/jumpserver-koko:$(IMAGE_TAG) . --load
 
 .PHONY: docker-ee
 docker-ee:docker

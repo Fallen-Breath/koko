@@ -1,3 +1,20 @@
+## fallen's fork
+
+与上游的差异：
+
+- 实现简单的 ssh 服务器指纹验证功能（https://github.com/jumpserver/jumpserver/issues/11901 ）
+
+Docker Hub 的 [fallenbreath/jumpserver-koko](https://hub.docker.com/r/fallenbreath/jumpserver-koko) 镜像（不保证更新）：
+
+- `fallenbreath/jumpserver-koko:v4.1.0-ce`
+
+镜像构建指令例子：
+
+```bash
+make docker IMAGE_TAG=v4.1.0-ce
+docker push fallenbreath/jumpserver-koko:v4.1.0-ce
+```
+
 
 # KoKo
 
