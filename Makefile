@@ -103,7 +103,7 @@ koko-ui:
 .PHONY: docker
 docker:
 	@echo "build docker images"
-	docker buildx build --build-arg VERSION=$(VERSION) -t jumpserver/koko:$(VERSION)-ce . --load
+	docker buildx build --build-arg VERSION=$(VERSION) -t fallenbreath/jumpserver-koko:$(VERSION)-ce . --load
 
 .PHONY: docker-ee
 docker-ee:docker
