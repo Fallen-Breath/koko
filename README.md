@@ -7,7 +7,7 @@
 Docker Hub 镜像格式（不保证更新）：
 
 - `fallenbreath/jumpserver-koko:latest`
-- `fallenbreath/jumpserver-koko:v3.8.0`
+- `fallenbreath/jumpserver-koko:v3.9.0`
 
 
 # KoKo
