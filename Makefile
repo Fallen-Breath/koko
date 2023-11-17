@@ -15,6 +15,8 @@ GOVERSION:= $(shell go version)
 CipherKey := $(shell head -c 100 /dev/urandom | base64 | head -c 32)
 TARGETARCH ?= amd64
 
+IMAGE_TAG=latest
+
 UIDIR=ui
 NPMINSTALL=yarn install
 NPMBUILD=yarn build --no-clean
@@ -103,7 +105,8 @@ koko-ui:
 .PHONY: docker
 docker:
 	@echo "build docker images"
-	docker buildx build --build-arg VERSION=$(VERSION) -t fallenbreath/jumpserver-koko:$(VERSION)-ce . --load
+	docker buildx build --build-arg VERSION=$(VERSION) -t fallenbreath/jumpserver-koko:latest . --load
+	docker tag fallenbreath/jumpserver-koko:latest fallenbreath/jumpserver-koko:$(IMAGE_TAG)
 
 .PHONY: docker-ee
 docker-ee:docker
