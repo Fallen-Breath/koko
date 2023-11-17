@@ -1,8 +1,8 @@
-**fallen's fork**
+## fallen's fork
 
 与上游的差异：
 
-- 实现简单的 ssh 服务器指纹验证功能（https://github.com/jumpserver/jumpserver/issues/11901）
+- 实现简单的 ssh 服务器指纹验证功能（https://github.com/jumpserver/jumpserver/issues/11901 ）
 
 Docker Hub 镜像格式（不保证更新）：
 
