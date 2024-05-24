@@ -4,10 +4,18 @@
 
 - 实现简单的 ssh 服务器指纹验证功能（https://github.com/jumpserver/jumpserver/issues/11901 ）
 
-Docker Hub 镜像格式（不保证更新）：
+Docker Hub 的 [fallenbreath/jumpserver-koko](https://hub.docker.com/r/fallenbreath/jumpserver-koko) 镜像（不保证更新）：
 
 - `fallenbreath/jumpserver-koko:latest`
-- `fallenbreath/jumpserver-koko:v3.10.0`
+- `fallenbreath/jumpserver-koko:v3.10.10`
+
+镜像构建指令例子：
+
+```bash
+make docker IMAGE_TAG=v3.10.10
+docker push fallenbreath/jumpserver-koko:latest
+docker push fallenbreath/jumpserver-koko:v3.10.10
+```
 
 
 # KoKo
