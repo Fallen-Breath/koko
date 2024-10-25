@@ -6,13 +6,13 @@
 
 Docker Hub 的 [fallenbreath/jumpserver-koko](https://hub.docker.com/r/fallenbreath/jumpserver-koko) 镜像（不保证更新）：
 
-- `fallenbreath/jumpserver-koko:v4.2.0-ce`
+- `fallenbreath/jumpserver-koko:v4.3.0-ce`
 
 镜像构建指令例子：
 
 ```bash
-make docker IMAGE_TAG=v4.2.0-ce
-docker push fallenbreath/jumpserver-koko:v4.2.0-ce
+make docker IMAGE_TAG=v4.3.0-ce
+docker push fallenbreath/jumpserver-koko:v4.3.0-ce
 ```
 
 
