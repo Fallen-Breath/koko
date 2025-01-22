@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       koko_version:
-        description: The version of koko used as the image tag, e.g. "v4.4.1-ce"
+        description: The version of koko used as the image tag, e.g. "v4.0.0-ce"
         type: string
         required: true
 
