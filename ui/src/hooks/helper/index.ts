@@ -4,7 +4,7 @@ import type { ILunaConfig } from '@/hooks/interface';
 import { Terminal } from '@xterm/xterm';
 import { useDebounceFn } from '@vueuse/core';
 import { useLogger } from '@/hooks/useLogger.ts';
-import { formatMessage, handleError, sendEventToLuna } from '@/components/CustomTerminal/helper';
+import { formatMessage, handleError, sendEventToLuna } from '@/components/TerminalComponent/helper';
 
 // 引入 Store
 import { useTreeStore } from '@/store/modules/tree.ts';
@@ -32,7 +32,6 @@ const { message } = createDiscreteApi(['message']);
  * @param socket
  * @param terminalId
  * @param termSelectionText
- * @param k8s_id
  */
 export const handleContextMenu = async (
   e: MouseEvent,
@@ -40,7 +39,6 @@ export const handleContextMenu = async (
   socket: WebSocket,
   terminalId: string,
   termSelectionText: string,
-  k8s_id: string | undefined
 ) => {
   if (e.ctrlKey || config.quickPaste !== '1') return;
 
@@ -52,18 +50,8 @@ export const handleContextMenu = async (
     if (termSelectionText !== '') text = termSelectionText;
   }
   e.preventDefault();
-  if (k8s_id) {
-    socket.send(
-      JSON.stringify({
-        id: terminalId,
-        k8s_id,
-        type: 'TERMINAL_K8S_DATA',
-        data: text
-      })
-    );
-  } else {
-    socket.send(formatMessage(terminalId, 'TERMINAL_DATA', text));
-  }
+  
+  socket.send(formatMessage(terminalId, 'TERMINAL_DATA', text));
 };
 
 /**
@@ -111,6 +99,19 @@ export const handleTerminalResize = (
   socket.send(formatMessage(terminalId, eventType, data));
 };
 
+// 将防抖函数移到外部，确保只创建一次
+const debouncedSwitchTab = useDebounceFn((lunaId: string, origin: string, key: string) => {
+  console.log('key')
+  switch (key) {
+    case 'ArrowRight':
+      sendEventToLuna('KEYEVENT', 'alt+shift+right', lunaId, origin);
+      break;
+    case 'ArrowLeft':
+      sendEventToLuna('KEYEVENT', 'alt+shift+left', lunaId, origin);
+      break;
+  }
+}, 500);
+
 /**
  * 针对特定的键盘组合进行操作
  *
@@ -125,35 +126,11 @@ export const handleCustomKey = (
   lunaId: string,
   origin: string
 ): boolean => {
-
-  const debouncedSwitchTab = useDebounceFn((lunaId: string, origin: string, key: string) => {
-    switch (key) {
-      case 'ArrowRight':
-        sendEventToLuna('KEYEVENT', 'alt+shift+right', lunaId, origin);
-        break;
-      case 'ArrowLeft':
-        sendEventToLuna('KEYEVENT', 'alt+shift+left', lunaId, origin);
-        break;
-    }
-  }, 500);
-
   if (e.altKey && e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-    switch (e.key) {
-      case 'ArrowRight':
-        if (lunaId && origin) {
-          debouncedSwitchTab(lunaId, origin, 'ArrowRight');
-        } else {
-          mittBus.emit('alt-shift-right');
-        }
-
-        break;
-      case 'ArrowLeft':
-        if (lunaId && origin) {
-          debouncedSwitchTab(lunaId, origin, 'ArrowLeft');
-        } else {
-          mittBus.emit('alt-shift-left');
-        }
-        break;
+    if (lunaId && origin) {
+      debouncedSwitchTab(lunaId, origin, e.key);
+    } else {
+      mittBus.emit(e.key === 'ArrowRight' ? 'alt-shift-right' : 'alt-shift-left');
     }
     return false;
   }
@@ -362,11 +339,11 @@ export const generateWsURL = () => {
 export const onWebsocketWrong = (event: Event, type: string, terminal?: Terminal) => {
   switch (type) {
     case 'error': {
-      terminal ? terminal.write('Connection Websocket Error') : '';
+      terminal ? terminal.write('\x1b[31mConnection Websocket Error\x1b[0m' + '\r\n') : '';
       break;
     }
     case 'disconnected': {
-      terminal ? terminal.write('Connection Websocket Closed') : '';
+      terminal ? terminal.write('\x1b[31mConnection Websocket Closed\x1b[0m') : '';
       break;
     }
   }
