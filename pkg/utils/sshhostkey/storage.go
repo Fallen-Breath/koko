@@ -17,7 +17,14 @@ func closeFileIgnoreError(f *os.File) {
 	_ = f.Close()
 }
 
-func getHostKey(filePath, hostname string) (ssh.PublicKey, int, error) {
+type HostKeyMapItem struct {
+	key    ssh.PublicKey
+	lineno int
+}
+
+type HostKeyMap = map[string]HostKeyMapItem // key type -> key item
+
+func getHostKeys(filePath, hostname string) (HostKeyMap, int, error) {
 	hostKeyStoreMutex.RLock()
 	defer hostKeyStoreMutex.RUnlock()
 
@@ -29,6 +36,8 @@ func getHostKey(filePath, hostname string) (ssh.PublicKey, int, error) {
 		return nil, 0, err
 	}
 	defer closeFileIgnoreError(file)
+
+	hostKeyMap := make(map[string]HostKeyMapItem)
 
 	scanner := bufio.NewScanner(file)
 	lineno := 0
@@ -49,9 +58,12 @@ func getHostKey(filePath, hostname string) (ssh.PublicKey, int, error) {
 			return nil, lineno, fmt.Errorf("invalid public key for host '%s' at line %d: %v", host, lineno, err)
 		}
 
-		return key, lineno, nil
+		hostKeyMap[key.Type()] = HostKeyMapItem{
+			key:    key,
+			lineno: lineno,
+		}
 	}
-	return nil, 0, nil
+	return hostKeyMap, 0, nil
 }
 
 func addHostKey(filePath, hostname string, key ssh.PublicKey) error {

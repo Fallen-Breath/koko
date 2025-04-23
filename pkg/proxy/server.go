@@ -26,6 +26,7 @@ import (
 	"github.com/jumpserver/koko/pkg/session"
 	"github.com/jumpserver/koko/pkg/srvconn"
 	"github.com/jumpserver/koko/pkg/utils"
+	"github.com/jumpserver/koko/pkg/utils/sshhostkey"
 	"github.com/jumpserver/koko/pkg/zmodem"
 )
 
@@ -565,7 +566,8 @@ func (s *Server) getMongoDBConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.
 	return
 }
 
-func (s *Server) getSSHConn() (srvConn *srvconn.SSHConnection, err error) {
+// getAvailableProxyClient: fallen's fork: check ssh host key -- add param suppressConnectionMsgFlag
+func (s *Server) getSSHConnPlus(suppressConnectionMsgFlag *atomic.Bool) (srvConn *srvconn.SSHConnection, err error) {
 	loginAccount := s.account.GetBaseAccount()
 	if s.suFromAccount != nil {
 		loginAccount = s.suFromAccount
@@ -622,19 +624,16 @@ func (s *Server) getSSHConn() (srvConn *srvconn.SSHConnection, err error) {
 		sshAuthOpts = append(sshAuthOpts, srvconn.SSHClientProxyClient(proxyArgs...))
 	}
 
-	// fallen's fork: check ssh host key -- store message lines
-	var connectionMessages []string
-	sshClient, err := srvconn.NewSSHClientWithMessenger(func(line string) {
-		connectionMessages = append(connectionMessages, line)
-	}, sshAuthOpts...)
-
-	// fallen's fork: check ssh host key -- send connection messages
-	for i, message := range connectionMessages {
-		if i == 0 {
-			utils.IgnoreErrWriteString(s.UserConn, "\r\n")
-		}
-		utils.IgnoreErrWriteString(s.UserConn, message+"\r\n")
-	}
+	// fallen's fork: check ssh host key
+	hostKeyCallbackCallGuard := sshhostkey.CreateCallbackCallGuard(
+		func() {
+			suppressConnectionMsgFlag.Store(true)
+		},
+		func() {
+			suppressConnectionMsgFlag.Store(false)
+		},
+	)
+	sshClient, err := srvconn.NewSSHClientWithMessenger(s.UserConn, hostKeyCallbackCallGuard, sshAuthOpts...)
 
 	if err != nil {
 		logger.Errorf("Get new ssh client err: %s", err)
@@ -699,6 +698,11 @@ func (s *Server) getSSHConn() (srvConn *srvconn.SSHConnection, err error) {
 		srvconn.ReleaseClientCacheKey(key, sshClient)
 	}()
 	return sshConn, nil
+}
+
+// getSSHConn: fallen's fork: check ssh host key -- preserve original interface
+func (s *Server) getSSHConn() (srvConn *srvconn.SSHConnection, err error) {
+	return s.getSSHConnPlus(&atomic.Bool{})
 }
 
 func (s *Server) getTelnetConn() (srvConn *srvconn.TelnetConnection, err error) {
@@ -823,11 +827,15 @@ func (s *Server) getServerConn(proxyAddr *net.TCPAddr) (srvconn.ServerConnection
 		utils.IgnoreErrWriteString(s.UserConn, "\r\n")
 		close(done)
 	}()
-	go s.sendConnectingMsg(done)
+
+	// fallen's fork: check ssh host key -- suppress-able connecting message
+	var suppressConnectionMsgFlag atomic.Bool
+	go s.sendConnectingMsgPlus(done, &suppressConnectionMsgFlag)
+
 	protocol := s.connOpts.authInfo.Protocol
 	switch protocol {
 	case srvconn.ProtocolSSH:
-		return s.getSSHConn()
+		return s.getSSHConnPlus(&suppressConnectionMsgFlag) // fallen's fork: check ssh host key -- suppress-able connecting message
 	case srvconn.ProtocolTELNET:
 		return s.getTelnetConn()
 	case srvconn.ProtocolK8s:
@@ -848,7 +856,8 @@ func (s *Server) getServerConn(proxyAddr *net.TCPAddr) (srvconn.ServerConnection
 	}
 }
 
-func (s *Server) sendConnectingMsg(done chan struct{}) {
+// getAvailableProxyClient: fallen's fork: check ssh host key -- add param suppressFlag
+func (s *Server) sendConnectingMsgPlus(done chan struct{}, suppressFlag *atomic.Bool) {
 	delay := 0.0
 	maxDelay := 5 * 60.0 // 最多执行五分钟
 	msg := fmt.Sprintf("%s  %.1f", s.connOpts.ConnectMsg(), delay)
@@ -863,6 +872,12 @@ func (s *Server) sendConnectingMsg(done chan struct{}) {
 				activeFlag = true
 				break
 			}
+
+			// getAvailableProxyClient: fallen's fork: check ssh host key -- add param suppressFlag
+			if suppressFlag.Load() {
+				break
+			}
+
 			if activeFlag {
 				utils.IgnoreErrWriteString(s.UserConn, utils.CharClear)
 				msg = fmt.Sprintf("%s  %.1f", s.connOpts.ConnectMsg(), delay)
@@ -877,6 +892,11 @@ func (s *Server) sendConnectingMsg(done chan struct{}) {
 		time.Sleep(100 * time.Millisecond)
 		delay += 0.1
 	}
+}
+
+// getAvailableProxyClient: fallen's fork: check ssh host key -- preserve original interface
+func (s *Server) sendConnectingMsg(done chan struct{}) {
+	s.sendConnectingMsgPlus(done, &atomic.Bool{})
 }
 
 func (s *Server) getCharset() string {
