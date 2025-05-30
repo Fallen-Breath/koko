@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"github.com/jumpserver/koko/pkg/auth"
+	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"io"
 	"net"
 	"sync"
@@ -127,6 +129,11 @@ func (w *WrapperSession) Pty() ssh.Pty {
 
 func (w *WrapperSession) ID() string {
 	return w.Uuid
+}
+
+// ConnUser added in fallen's fork: check ssh host key -- super-user check
+func (w *WrapperSession) ConnUser() *model.User {
+	return w.Context().Value(auth.ContextKeyUser).(*model.User)
 }
 
 func NewWrapperSession(sess ssh.Session) *WrapperSession {

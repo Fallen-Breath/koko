@@ -13,6 +13,10 @@ type User struct {
 	IsValid  bool   `json:"is_valid"`
 	IsActive bool   `json:"is_active"`
 	OTPLevel int    `json:"otp_level"`
+
+	// fallen's fork: check ssh host key -- add model field
+	// https://github.com/jumpserver/jumpserver/blob/5e0babdba8adbcdbccdde85b5e66df242664f21a/apps/users/serializers/user.py#L132-L134
+	IsSuperuser bool `json:"is_superuser"`
 }
 
 type MiniUser struct {

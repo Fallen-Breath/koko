@@ -3,6 +3,7 @@ package sshhostkey
 import (
 	"bytes"
 	"fmt"
+	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"github.com/jumpserver/koko/pkg/logger"
 	"github.com/jumpserver/koko/pkg/utils"
 	"golang.org/x/crypto/ssh"
@@ -44,9 +45,10 @@ func (cb *simpleHostKeyCallbackImpl) writeMessage(msg string) {
 }
 
 func (cb *simpleHostKeyCallbackImpl) readYesOrNo(prompt string) (bool, error) {
-	vt := term.NewTerminal(cb.userConn, "[SSH] "+prompt)
+	vt := term.NewTerminal(cb.userConn, "")
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 5; i++ {
+		utils.IgnoreErrWriteString(cb.userConn, "[SSH] "+prompt)
 		line, err := vt.ReadLine()
 		if err != nil {
 			logger.Errorf("Get host key confirmation from user err: %s", err)
@@ -57,17 +59,29 @@ func (cb *simpleHostKeyCallbackImpl) readYesOrNo(prompt string) (bool, error) {
 		logger.Infof("Get host key confirmation from input for user %q", line)
 
 		switch line {
-		case "y", "yes":
+		case "yes":
 			return true, nil
-		case "n", "no":
+		case "no":
 			return false, nil
-		default:
-			logger.Warnf("Invalid input: %s, please enter 'y', 'yes', 'n', or 'no'", line)
 		}
 	}
 
-	logger.Errorf("Too many invalid attempts")
-	return false, fmt.Errorf("too many invalid attempts")
+	logger.Errorf("No confirmation response has been made by user")
+	return false, fmt.Errorf("no confirmation response has been made")
+}
+
+// userConn is a UserConnection interface, and we made all the implementations implement this interface
+type connUserGetter interface {
+	ConnUser() *model.User
+}
+
+func isSuperuser(userConn io.ReadWriter) bool {
+	cug, ok := userConn.(connUserGetter)
+	if !ok {
+		return false
+	}
+	user := cug.ConnUser()
+	return user != nil && user.IsSuperuser
 }
 
 func (cb *simpleHostKeyCallbackImpl) callback(hostname string, _ net.Addr, key ssh.PublicKey) error {
@@ -97,25 +111,42 @@ func (cb *simpleHostKeyCallbackImpl) callback(hostname string, _ net.Addr, key s
 		matched := bytes.Equal(key.Marshal(), existingKey.Marshal())
 
 		if matched {
-			logger.Infof("Host key matched for host '%s': '%s' (%s)", hostname, receivedSha, receivedType)
+			logger.Infof("Host key matched for host %+q: %+q (%s)", hostname, receivedSha, receivedType)
+			return nil
+		}
+
+		logger.Warnf("Host key mismatched for host '%s', expected '%s' (%s), received '%s' (%s)", hostname, existingSha, existingType, receivedSha, receivedType)
+
+		cb.writeMessage(fmt.Sprintf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"))
+		cb.writeMessage(fmt.Sprintf("@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @"))
+		cb.writeMessage(fmt.Sprintf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"))
+		cb.writeMessage(fmt.Sprintf("The remote host key has been changed, or you are under man-in-the-middle attack attack!"))
+		cb.writeMessage(fmt.Sprintf(""))
+		cb.writeMessage(fmt.Sprintf("Host key mismatched for host '%s'", hostname))
+		cb.writeMessage(fmt.Sprintf("Expected host key fingerprint: '%s' (%s)", existingSha, existingType))
+		cb.writeMessage(fmt.Sprintf("Received host key fingerprint: '%s' (%s)", receivedSha, receivedType))
+
+		if isSuperuser(cb.userConn) {
+			cb.writeMessage("")
+			userAllowed, err := cb.readYesOrNo("[ADMIN] Do you want to accept the new host key (yes/no)? ")
+			if err != nil {
+				return fmt.Errorf("host key verification failed: admin confirmation error: %v", err)
+			}
+			if !userAllowed {
+				return fmt.Errorf("host key verification failed: host key mismatched")
+			}
+			cb.writeMessage(fmt.Sprintf("Warning: Permanently updated host key '%s' (%s) for '%s' to the list of known hosts", receivedSha, receivedType, hostname))
+
+			if err := updateHostKey(storeFilePath, hostname, key); err != nil {
+				logger.Errorf("Override host key to store %+q failed: %v", storeFilePath, err)
+			}
 			return nil
 		} else {
-			logger.Warnf("Host key mismatched for host '%s', expected '%s' (%s), received '%s' (%s)", hostname, existingSha, existingType, receivedSha, receivedType)
-
-			cb.writeMessage(fmt.Sprintf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"))
-			cb.writeMessage(fmt.Sprintf("@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @"))
-			cb.writeMessage(fmt.Sprintf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"))
-			cb.writeMessage(fmt.Sprintf("The remote host key has been changed, or you are under man-in-the-middle attack attack!"))
-			cb.writeMessage(fmt.Sprintf(""))
-			cb.writeMessage(fmt.Sprintf("Host key mismatched for host '%s'", hostname))
-			cb.writeMessage(fmt.Sprintf("Expected host key fingerprint: '%s' (%s)", existingSha, existingType))
-			cb.writeMessage(fmt.Sprintf("Received host key fingerprint: '%s' (%s)", receivedSha, receivedType))
-			cb.writeMessage(fmt.Sprintf("Please contact the jumpserver administrator, verify and fix the host fingerprint of host '%s' in %s:%d", hostname, storeFilePath, existingKeyItem.lineno))
-
+			cb.writeMessage(fmt.Sprintf("Please contact the JumpServer administrator, to verify and fix the host fingerprint of host '%s' in %s:%d", hostname, storeFilePath, existingKeyItem.lineno))
 			return fmt.Errorf("host key verification failed: host key mismatched")
 		}
 	} else {
-		logger.Warnf("New host key for host '%s': '%s' (%s)", hostname, receivedSha, receivedType)
+		logger.Warnf("New host key for host %+q: %+q (%s)", hostname, receivedSha, receivedType)
 
 		cb.writeMessage(fmt.Sprintf("The authenticity of host '%s' can't be established.", hostname))
 		if len(existingKeys) > 0 {
@@ -129,19 +160,23 @@ func (cb *simpleHostKeyCallbackImpl) callback(hostname string, _ net.Addr, key s
 		}
 		cb.writeMessage(fmt.Sprintf("Received host key fingerprint: '%s' (%s)", receivedSha, receivedType))
 
-		// TODO: only allow admin user to accept the host key
-		userAllowed, err := cb.readYesOrNo("Are you sure you want to continue connecting (y/yes/n/no)? ")
-		if err != nil {
-			return fmt.Errorf("host key verification failed: user confirmation error: %v", err)
-		}
-		if !userAllowed {
-			return fmt.Errorf("host key verification failed: user said no")
-		}
+		if isSuperuser(cb.userConn) {
+			userAllowed, err := cb.readYesOrNo("[ADMIN] Are you sure you want to continue connecting (yes/no)? ")
+			if err != nil {
+				return fmt.Errorf("host key verification failed: user confirmation error: %v", err)
+			}
+			if !userAllowed {
+				return fmt.Errorf("host key verification failed: user said no")
+			}
 
-		cb.writeMessage(fmt.Sprintf("Warning: Permanently added host key '%s' (%s) for '%s' to the list of known hosts", receivedSha, receivedType, hostname))
-		if err := addHostKey(storeFilePath, hostname, key); err != nil {
-			logger.Errorf("Add host key store to '%s' failed: %v", storeFilePath, err)
+			cb.writeMessage(fmt.Sprintf("Warning: Permanently added host key '%s' (%s) for '%s' to the list of known hosts", receivedSha, receivedType, hostname))
+			if err := addHostKey(storeFilePath, hostname, key); err != nil {
+				logger.Errorf("Add host key to store %+q failed: %v", storeFilePath, err)
+			}
+			return nil
+		} else {
+			cb.writeMessage("Only JumpServer administrators are allowed to accept new host keys. Please contact the administrator to do so")
+			return fmt.Errorf("host key verification failed: host key unrecognized")
 		}
-		return nil
 	}
 }

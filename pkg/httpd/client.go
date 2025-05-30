@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"io"
 	"sync"
 	"time"
@@ -133,6 +134,11 @@ func (c *Client) SetWinSize(size ssh.Window) {
 
 func (c *Client) ID() string {
 	return c.Conn.Uuid
+}
+
+// ConnUser added in fallen's fork: check ssh host key -- super-user check
+func (c *Client) ConnUser() *model.User {
+	return c.Conn.user
 }
 
 func (c *Client) WriteData(p []byte) {
