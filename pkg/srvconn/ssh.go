@@ -175,6 +175,38 @@ func getAvailableProxyClientWithMessenger(userConn io.ReadWriter, hostKeyCallbac
 	return nil, ErrNoAvailable
 }
 
+// fallen's fork: proxyClient connection lag fix
+//
+// Yeet the mysterious lag in connected shell (created from proxyConn)
+// when the RTT from koko to gateway is sufficiently high (e.g. >= 150ms)
+//
+// An easy way to observe the mysterious lag: hold down any key on the keyboard,
+// and observe the smoothness of the echoed characters
+//
+// This issue also exists with the OpenSSH client:
+// If you add "-D" to the OpenSSH client's "-L" command, its destConn will have similar lag to koko's destConn.
+//
+//	ssh -L 2222:127.0.0.1:22 root@example.com
+//	ssh -L 2222:127.0.0.1:22 root@example.com -N    # as laggy as vanilla koko
+//
+// Tested with remote ssh server version: OpenSSH_8.7p1 (from RHEL 9)
+// god knows why :(
+func fixProxySshClientDialConnectionLag(proxyClient *SSHClient) (func(), error) {
+	ses, err := proxyClient.NewSession()
+	if err != nil {
+		return nil, err
+	}
+
+	err = ses.Shell() // this is the magic call that yeet the connection lag
+	if err != nil {
+		return nil, err
+	}
+
+	return func() {
+		_ = ses.Close()
+	}, nil
+}
+
 func NewSSHClientWithCfg(userConn io.ReadWriter, hostKeyCallbackCallGuard sshhostkey.CallbackCallGuard, cfg *SSHClientOptions) (*SSHClient, error) {
 	gosshCfg := gossh.ClientConfig{
 		User:            cfg.Username,
@@ -193,6 +225,16 @@ func NewSSHClientWithCfg(userConn io.ReadWriter, hostKeyCallbackCallGuard sshhos
 			return nil, err
 		}
 		logger.Infof("Get gateway client(%s) success ", proxyClient)
+
+		// fallen's fork: proxyClient connection lag fix -- start
+		if fixCloser, err := fixProxySshClientDialConnectionLag(proxyClient); err == nil {
+			defer fixCloser()
+			logger.Infof("Allocat dummy shell for gateway client(%s) success", proxyClient)
+		} else {
+			logger.Infof("Allocat dummy shell for gateway client(%s) error: %v", proxyClient, err)
+		}
+		// fallen's fork: proxyClient connection lag fix -- end
+
 		destConn, err := proxyClient.Dial("tcp", destAddr)
 		if err != nil {
 			_ = proxyClient.Close()
