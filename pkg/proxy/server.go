@@ -16,12 +16,12 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 
-	"github.com/jumpserver/koko/pkg/common"
+	"github.com/jumpserver-dev/sdk-go/common"
+	"github.com/jumpserver-dev/sdk-go/model"
+	"github.com/jumpserver-dev/sdk-go/service"
+
 	"github.com/jumpserver/koko/pkg/config"
 	"github.com/jumpserver/koko/pkg/exchange"
-	modelCommon "github.com/jumpserver/koko/pkg/jms-sdk-go/common"
-	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
-	"github.com/jumpserver/koko/pkg/jms-sdk-go/service"
 	"github.com/jumpserver/koko/pkg/logger"
 	"github.com/jumpserver/koko/pkg/session"
 	"github.com/jumpserver/koko/pkg/srvconn"
@@ -117,15 +117,17 @@ func NewServer(conn UserConnection, jmsService *service.JMService, opts ...Conne
 		gateway:       connOpts.authInfo.Gateway,
 		sessionInfo:   apiSession,
 		CreateSessionCallback: func() error {
-			apiSession.DateStart = modelCommon.NewNowUTCTime()
+			apiSession.DateStart = common.NewNowUTCTime()
 			_, err2 := jmsService.CreateSession(*apiSession)
 			return err2
 		},
 		ConnectedFailedCallback: func(err error) error {
-			return jmsService.SessionFailed(apiSession.ID, err)
+			_, err1 := jmsService.SessionFailed(apiSession.ID, err)
+			return err1
 		},
 		DisConnectedCallback: func() error {
-			return jmsService.SessionDisconnect(apiSession.ID)
+			_, err2 := jmsService.SessionDisconnect(apiSession.ID)
+			return err2
 		},
 	}, nil
 }
@@ -207,7 +209,7 @@ func (s *Server) ZmodemFileTransferEvent(zinfo *zmodem.ZFileInfo, status bool) {
 			RemoteAddr: s.UserConn.RemoteAddr(),
 			Operate:    operate,
 			Path:       zinfo.Filename(),
-			DateStart:  modelCommon.NewUTCTime(zinfo.Time()),
+			DateStart:  common.NewUTCTime(zinfo.Time()),
 			IsSuccess:  status,
 			Session:    s.sessionInfo.ID,
 		}
@@ -511,8 +513,12 @@ func (s *Server) getRedisConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.Re
 		port = localTunnelAddr.Port
 	}
 	username := s.account.Username
-	protocolSetting := platform.GetProtocol("redis")
-	if s.account.IsNull() || !protocolSetting.Setting.AuthUsername {
+	isAuthUsername := false
+	if platfromProtocol, ok := platform.GetProtocolSetting("redis"); ok {
+		protocolSetting := platfromProtocol.GetSetting()
+		isAuthUsername = protocolSetting.AuthUsername
+	}
+	if s.account.IsNull() || !isAuthUsername {
 		username = ""
 	}
 	srvConn, err = srvconn.NewRedisConnection(
@@ -543,9 +549,15 @@ func (s *Server) getMongoDBConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.
 		port = localTunnelAddr.Port
 	}
 	platform := s.connOpts.authInfo.Platform
-	protocolSetting := platform.GetProtocol("mongodb")
-	authSource := protocolSetting.Setting.AuthSource
-	connectionOpts := protocolSetting.Setting.ConnectionOpts
+
+	authSource := ""
+	connectionOpts := ""
+	if platfromProtocol, ok := platform.GetProtocolSetting("mongodb"); ok {
+		protocolSetting := platfromProtocol.GetSetting()
+		authSource = protocolSetting.AuthSource
+		connectionOpts = protocolSetting.ConnectionOpts
+	}
+
 	srvConn, err = srvconn.NewMongoDBConnection(
 		srvconn.SqlHost(host),
 		srvconn.SqlPort(port),
@@ -572,6 +584,7 @@ func (s *Server) getSSHConnPlus(suppressConnectionMsgFlag *atomic.Bool) (srvConn
 	if s.suFromAccount != nil {
 		loginAccount = s.suFromAccount
 	}
+	platform := s.connOpts.authInfo.Platform
 	asset := s.connOpts.authInfo.Asset
 	protocol := s.connOpts.authInfo.Protocol
 	user := s.connOpts.authInfo.User
@@ -588,7 +601,9 @@ func (s *Server) getSSHConnPlus(suppressConnectionMsgFlag *atomic.Bool) (srvConn
 			sshAuthOpts = append(sshAuthOpts, srvconn.SSHClientPrivateAuth(signer))
 		}
 	} else {
-		sshAuthOpts = append(sshAuthOpts, srvconn.SSHClientPassword(loginAccount.Secret))
+		if !isPlatform(&platform, "MFA") {
+			sshAuthOpts = append(sshAuthOpts, srvconn.SSHClientPassword(loginAccount.Secret))
+		}
 	}
 
 	password := loginAccount.Secret
@@ -646,7 +661,6 @@ func (s *Server) getSSHConnPlus(suppressConnectionMsgFlag *atomic.Bool) (srvConn
 		return nil, err
 	}
 
-	platform := s.connOpts.authInfo.Platform
 	pty := s.UserConn.Pty()
 	charset := s.getCharset()
 	sshConnectOpts := make([]srvconn.SSHOption, 0, 6)
@@ -717,10 +731,15 @@ func (s *Server) getTelnetConn() (srvConn *srvconn.TelnetConnection, err error) 
 	asset := s.connOpts.authInfo.Asset
 	platform := s.connOpts.authInfo.Platform
 
-	protocolSetting := platform.GetProtocol(protocol)
-	usernamePrompt := strings.TrimSpace(protocolSetting.Setting.TelnetUsernamePrompt)
-	passwordPrompt := strings.TrimSpace(protocolSetting.Setting.TelnetPasswordPrompt)
-	successPrompt := strings.TrimSpace(protocolSetting.Setting.TelnetSuccessPrompt)
+	usernamePrompt := ""
+	passwordPrompt := ""
+	successPrompt := ""
+	if platfromProtocol, ok := platform.GetProtocolSetting(protocol); ok {
+		protocolSetting := platfromProtocol.GetSetting()
+		usernamePrompt = strings.TrimSpace(protocolSetting.TelnetUsernamePrompt)
+		passwordPrompt = strings.TrimSpace(protocolSetting.TelnetPasswordPrompt)
+		successPrompt = strings.TrimSpace(protocolSetting.TelnetSuccessPrompt)
+	}
 
 	if usernamePrompt != "" {
 		usernamePattern, err1 := regexp.Compile(usernamePrompt)

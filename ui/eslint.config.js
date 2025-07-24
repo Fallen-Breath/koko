@@ -1,27 +1,59 @@
-import { defineConfig } from "eslint/config";
-import globals from "globals";
-import js from "@eslint/js";
-import tseslint from "typescript-eslint";
-import pluginVue from "eslint-plugin-vue";
+import antfu from '@antfu/eslint-config';
 
-
-export default defineConfig([
+export default antfu(
   {
-    ignores: [
-      'node_modules',
-      'dist',
-      'public',
-    ],
+    stylistic: {
+      indent: 2,
+      quotes: 'single',
+      semi: true,
+    },
+
+    typescript: true,
+    vue: true,
+
+    ignores: ['src/style/font/**/*'],
   },
-  { files: ["**/*.{js,mjs,cjs,ts,vue}"] },
-  { files: ["**/*.{js,mjs,cjs,ts,vue}"], languageOptions: { globals: globals.browser } },
-  { files: ["**/*.{js,mjs,cjs,ts,vue}"], plugins: { js }, extends: ["js/recommended"] },
-  tseslint.configs.recommended,
-  pluginVue.configs["flat/essential"],
-  { files: ["**/*.vue"], languageOptions: { parserOptions: { parser: tseslint.parser } }, rules: {
-    'vue/multi-word-component-names': 'off',
-    'vue/require-default-prop': 'error',
-    'vue/attributes-order': 'error',
-    'vue/attribute-hyphenation': 'error'
-  } },
-]);
+  {
+    rules: {
+      'perfectionist/sort-imports': [
+        'error',
+        {
+          type: 'line-length',
+          order: 'asc',
+          ignoreCase: true,
+          newlinesBetween: 'always',
+          groups: [
+            'type',
+            'builtin',
+            'external',
+            'internal-type',
+            'internal',
+            ['parent-type', 'sibling-type', 'index-type'],
+            ['parent', 'sibling', 'index'],
+            'object',
+            'unknown',
+          ],
+        },
+      ],
+      'antfu/top-level-function': 'off',
+
+      // 忽略以 _ 开头的未使用变量
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      'unused-imports/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
+);

@@ -5,7 +5,7 @@ import (
 
 	"github.com/jumpserver/koko/pkg/exchange"
 
-	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
+	"github.com/jumpserver-dev/sdk-go/model"
 )
 
 type Message struct {
@@ -163,10 +163,17 @@ type OpenAIParam struct {
 	Type      string
 }
 
+type QARecord struct {
+	Question string
+	Answer   string
+}
+
 type AIConversation struct {
 	Id                   string
 	Prompt               string
-	HistoryRecords       []string
+	Question             string
+	Model                string
+	Context              []QARecord
 	InterruptCurrentChat bool
 }
 
