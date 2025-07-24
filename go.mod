@@ -40,6 +40,8 @@ require (
 	k8s.io/client-go v0.23.1
 )
 
+replace github.com/jumpserver-dev/sdk-go v0.0.0-20250708102012-cc8ddd4e8cad => github.com/Fallen-Breath/jumpserver-sdk-go v0.0.0-20250724071434-88b9c614e7ee
+
 require (
 	github.com/Azure/azure-pipeline-go v0.1.9 // indirect
 	github.com/LeeEirc/httpsig v1.2.1 // indirect

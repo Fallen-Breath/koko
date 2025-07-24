@@ -3,7 +3,7 @@ package sshhostkey
 import (
 	"bytes"
 	"fmt"
-	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
+	"github.com/jumpserver-dev/sdk-go/model"
 	"github.com/jumpserver/koko/pkg/logger"
 	"github.com/jumpserver/koko/pkg/utils"
 	"golang.org/x/crypto/ssh"

@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
+	"github.com/jumpserver-dev/sdk-go/model"
 	"github.com/jumpserver/koko/pkg/auth"
-	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"io"
 	"net"
 	"sync"

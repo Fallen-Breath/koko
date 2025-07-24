@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
+	"github.com/jumpserver-dev/sdk-go/model"
 	"io"
 	"sync"
 	"time"
