@@ -35,8 +35,8 @@ func (s *Server) getUSQLConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.USQ
 		return nil, errUnknownProtocol
 	}
 	disableSQLServerEncrypt := false
-	if platfromProtocol, ok := platform.GetProtocolSetting(protocol); ok {
-		protocolSetting := platfromProtocol.GetSetting()
+	if platformProtocol, ok1 := platform.GetProtocolSetting(protocol); ok1 {
+		protocolSetting := platformProtocol.GetSetting()
 		disableSQLServerEncrypt = !protocolSetting.Encrypt
 	}
 
@@ -59,6 +59,7 @@ func (s *Server) getUSQLConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.USQ
 		Width:  s.UserConn.Pty().Window.Width,
 		Height: s.UserConn.Pty().Window.Height,
 	}))
+	opts = append(opts, srvconn.SqlMaskingRules(s.connOpts.authInfo.DataMaskingRules))
 	srvConn, err = srvconn.NewUSQLConnection(opts...)
 
 	return

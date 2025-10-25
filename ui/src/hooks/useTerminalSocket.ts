@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n';
 import xtermTheme from 'xterm-theme';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { SearchAddon } from '@xterm/addon-search';
 import { createDiscreteApi, darkTheme } from 'naive-ui';
 import { readText, writeText } from 'clipboard-polyfill';
@@ -59,7 +60,7 @@ export const useTerminalSocket = () => {
   const { createSentry } = useZmodem();
   const { width, height } = useWindowSize();
 
-  const { sendLunaEvent, emitTerminalConnect, emitTerminalSession } = useTerminalEvents();
+  const { sendLunaEvent, emitTerminalConnect, emitTerminalSession, sendMittEvent } = useTerminalEvents();
 
   const containerRef = shallowRef<HTMLElement>();
 
@@ -87,6 +88,7 @@ export const useTerminalSocket = () => {
   const terminalSettingsStore = useTerminalSettingsStore();
 
   const fitAddon = new FitAddon();
+  const webglAddon = new WebglAddon();
   const searchAddon = new SearchAddon();
 
   const configProviderPropsRef = computed<ConfigProviderProps>(() => ({
@@ -127,6 +129,15 @@ export const useTerminalSocket = () => {
   /**
    * @description 分发 Socket 消息
    */
+
+  let lastMessage: string;
+
+  function showInfoOnce(content: string) {
+    if (lastMessage === content) return;
+    message.info(content);
+    lastMessage = content;
+  }
+
   const dispatch = (socketData: string) => {
     if (!socketData || !socketRef.value || !terminalRef.value) return;
 
@@ -328,8 +339,14 @@ export const useTerminalSocket = () => {
       }
       case MESSAGE_TYPE.TERMINAL_SESSION_PAUSE: {
         const data = JSON.parse(parsedMessageData.data);
-
-        message.info(`${data.user} ${t('PauseSession')}`);
+        const content = `${data.user} ${t('PauseSession')}`;
+        showInfoOnce(content);
+        break;
+      }
+      case MESSAGE_TYPE.TERMINAL_SESSION_RESUME: {
+        const data = JSON.parse(parsedMessageData.data);
+        const content = `${data.user} ${t('ResumeSession')}`;
+        showInfoOnce(content);
         break;
       }
       case MESSAGE_TYPE.TERMINAL_GET_SHARE_USER: {
@@ -339,12 +356,6 @@ export const useTerminalSocket = () => {
           userOptions: userOptions.value,
         });
 
-        break;
-      }
-      case MESSAGE_TYPE.TERMINAL_SESSION_RESUME: {
-        const data = JSON.parse(parsedMessageData.data);
-
-        message.info(`${data.user} ${t('ResumeSession')}`);
         break;
       }
       case MESSAGE_TYPE.TERMINAL_SHARE_USER_REMOVE: {
@@ -399,10 +410,10 @@ export const useTerminalSocket = () => {
         const currentDate = new Date();
 
         if (lastReceiveTime.value.getTime() - currentDate.getTime() > MaxTimeout) {
-           console.error('More than 30 seconds do not receive data');
+          console.error('More than 30 seconds do not receive data');
         }
 
-        const pingTimeout = (currentDate.getTime() - lastSendTime.value.getTime()) - MaxTimeout;
+        const pingTimeout = currentDate.getTime() - lastSendTime.value.getTime() - MaxTimeout;
 
         if (pingTimeout < 0) {
           return;
@@ -417,9 +428,10 @@ export const useTerminalSocket = () => {
       terminalRef.value.write(`\r\n`);
       terminalRef.value.write(`\x1B[31m${t('WebSocketClosed')}\x1B[0m`);
     };
-    socketRef.value.onmessage = (message: MessageEvent) => {
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+    socketRef.value.onmessage = async (message: MessageEvent) => {
+      await sleep(1); // time sleep 0.001, avoid long write and block websocket send
       lastReceiveTime.value = new Date();
-
       if (typeof message.data === 'object') {
         handleBinaryMessage(message);
       } else {
@@ -479,6 +491,16 @@ export const useTerminalSocket = () => {
         terminalId: terminalId.value,
       });
     });
+
+    // 监听 ctrl + f 或 command + f 快捷键
+    containerRef.value!.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'f') {
+          sendMittEvent('open-search');
+          e.preventDefault();
+        }
+      }
+    });
   };
 
   /**
@@ -498,6 +520,7 @@ export const useTerminalSocket = () => {
 
       const processedData = preprocessInput(data, terminalSettingsStore.getConfig);
       socketRef.value!.send(formatMessage('', FORMATTER_MESSAGE_TYPE.TERMINAL_DATA, processedData));
+      lunaCommunicator.sendLuna(LUNA_MESSAGE_TYPE.INPUT_ACTIVE, '');
     });
     terminalRef.value.onResize(({ cols, rows }) => debouncedResize({ cols, rows }));
     terminalRef.value.onSelectionChange(async () => {
@@ -553,6 +576,7 @@ export const useTerminalSocket = () => {
     });
 
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(webglAddon);
     terminal.loadAddon(searchAddon);
 
     terminalRef.value = terminal;
@@ -603,6 +627,7 @@ export const useTerminalSocket = () => {
   });
 
   return {
+    searchAddon,
     containerRef,
   };
 };

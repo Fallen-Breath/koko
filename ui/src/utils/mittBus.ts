@@ -1,5 +1,4 @@
 import type { Ref } from 'vue';
-import type { Emitter } from 'mitt';
 import type { UploadFileInfo } from 'naive-ui';
 
 import mitt from 'mitt';
@@ -46,6 +45,10 @@ interface Event {
   };
   writeDataToTerminal: { type: string };
   'write-command': { type: string };
+  'open-search': void;
+  'file-manager-expired': void;
+  'connect-error': void;
+  'close-drawer': void;
 }
 
 // @ts-expect-error mittBus is not typed

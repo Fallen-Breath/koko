@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
+	"github.com/jumpserver/koko/pkg/i18n"
 	"github.com/jumpserver/koko/pkg/proxy"
 	"github.com/jumpserver/koko/pkg/srvconn"
 
@@ -71,6 +73,7 @@ func (userCon *UserWebsocket) initial() error {
 }
 
 func (userCon *UserWebsocket) Run() {
+	lang := i18n.NewLang(userCon.langCode)
 	if userCon.handler == nil {
 		return
 	}
@@ -104,7 +107,7 @@ func (userCon *UserWebsocket) Run() {
 		)
 		if err != nil {
 			logger.Errorf("Ws[%s] create k8s client err: %s", userCon.Uuid, err)
-			userCon.SendErrMessage("Create k8s client err")
+			userCon.SendErrMessage(fmt.Sprintf(lang.T("Create k8s client err: %s"), err))
 			return
 		}
 	}

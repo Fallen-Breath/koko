@@ -20,6 +20,17 @@ var authErr = errors.New("auth failed")
 type SSHAuthFunc func(ctx ssh.Context, password, publicKey string) error
 
 func SSHPasswordAndPublicKeyAuth(jmsService *service.JMService) SSHAuthFunc {
+	needPasswordAuthErr := &ssh.PartialSuccessError{Next: ssh.ServerAuthCallbacks{
+		PasswordCallback: func(ctx1 ssh.Context, pwd string) error {
+			return SSHPasswordAndPublicKeyAuth(jmsService)(ctx1, pwd, "")
+		},
+	}}
+	needPublicKeyAuthErr := &ssh.PartialSuccessError{Next: ssh.ServerAuthCallbacks{
+		PublicKeyCallback: func(ctx1 ssh.Context, pub ssh.PublicKey) error {
+			key := string(gossh.MarshalAuthorizedKey(pub))
+			return SSHPasswordAndPublicKeyAuth(jmsService)(ctx1, "", key)
+		},
+	}}
 	return func(ctx ssh.Context, password, publicKey string) error {
 		if password == "" && publicKey == "" {
 			logger.Errorf("SSH conn[%s] no password and publickey", ctx.SessionID())
@@ -47,9 +58,38 @@ func SSHPasswordAndPublicKeyAuth(jmsService *service.JMService) SSHAuthFunc {
 		if password != "" {
 			authMethod = "password"
 		}
+		checkedUser := ctx.Value(ContextKeyCheckUsername)
+		if authMethod == "publickey" && checkedUser == nil {
+			//  Only the first public key authentication is used to check whether the username has a public key.
+			ctx.SetValue(ContextKeyCheckUsername, true)
+			if pendingUser, err := jmsService.GetUserByUsername(username); err == nil {
+				if !pendingUser.HasPublicKeys {
+					logger.Infof("SSH conn[%s] user %s has no public keys", ctx.SessionID(), username)
+					return authErr
+				}
+			} else {
+				logger.Debugf("SSH conn[%s] user %s check public keys failed: %s",
+					ctx.SessionID(), username, err)
+			}
+		}
+		conf := config.GetConf()
+		authCount := 0
+		currentNeedAuthMethod := "publickey"
+		if countVal := ctx.Value(ContextKeyAuthCount); countVal != nil {
+			authCount = countVal.(int)
+		}
+		if authVal := ctx.Value(ContextKeyCurrentAuth); authVal != nil {
+			currentNeedAuthMethod = authVal.(string)
+		} else {
+			ctx.SetValue(ContextKeyCurrentAuth, currentNeedAuthMethod)
+		}
+		if conf.ForceMultiAuth && authMethod != currentNeedAuthMethod {
+			logger.Errorf("SSH conn[%s] force multiauth current auth method %s mismatch %s",
+				ctx.SessionID(), currentNeedAuthMethod, authMethod)
+			return needPublicKeyAuthErr
+		}
 		newClient := jmsService.CloneClient()
 		var accessKey model.AccessKey
-		conf := config.GetConf()
 		_ = accessKey.LoadFromFile(conf.AccessKeyFilePath)
 		userClient := service.NewUserClient(
 			service.UserClientUsername(username),
@@ -70,6 +110,11 @@ func SSHPasswordAndPublicKeyAuth(jmsService *service.JMService) SSHAuthFunc {
 		switch authStatus {
 		case authSuccess:
 			ctx.SetValue(ContextKeyUser, &user)
+			if conf.ForceMultiAuth && authMethod == "publickey" {
+				res = needPasswordAuthErr
+				ctx.SetValue(ContextKeyCurrentAuth, "password")
+				action = actionPartialAccepted
+			}
 		case authConfirmRequired, authMFARequired:
 			action = actionPartialAccepted
 			ctx.SetValue(ContextKeyAuthStatus, authStatus)
@@ -79,6 +124,13 @@ func SSHPasswordAndPublicKeyAuth(jmsService *service.JMService) SSHAuthFunc {
 		default:
 			action = actionFailed
 			res = authErr
+			if conf.ForceMultiAuth && authMethod == "publickey" {
+				authCount++
+				if authCount < 3 {
+					ctx.SetValue(ContextKeyAuthCount, authCount)
+					res = needPublicKeyAuthErr
+				}
+			}
 		}
 		logger.Infof("SSH conn[%s] %s %s for %s from %s", ctx.SessionID(),
 			action, authMethod, username, remoteAddr)
@@ -127,6 +179,12 @@ const (
 	ContextKeyAuthFailed = "CONTEXT_AUTH_FAILED"
 
 	ContextKeyDirectLoginFormat = "CONTEXT_DIRECT_LOGIN_FORMAT"
+
+	ContextKeyCheckUsername = "CONTEXT_CHECK_USERNAME"
+
+	ContextKeyCurrentAuth = "CONTEXT_CURRENT_AUTH"
+
+	ContextKeyAuthCount = "CONTEXT_AUTH_COUNT"
 )
 
 type DirectLoginAssetReq struct {

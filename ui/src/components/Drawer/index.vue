@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { FolderKanban, Keyboard as KeyboardIcon, Share2, X } from 'lucide-vue-next';
 
 import type { LunaMessage } from '@/types/modules/postmessage.type';
 
 import mittBus from '@/utils/mittBus';
 import { lunaCommunicator } from '@/utils/lunaBus';
+import { useSessionAdapter } from '@/hooks/useSessionAdapter';
 import { LUNA_MESSAGE_TYPE } from '@/types/modules/message.type';
 import { useConnectionStore } from '@/store/modules/useConnection';
 
-import Keyboard from './components/Keyboard/index.vue';
+import General from './components/General/index.vue';
 import SessionShare from './components/SessionShare/index.vue';
 import FileManager from './components/FileManagement/index.vue';
 
@@ -23,13 +24,14 @@ const MAX_WAIT_TIME = 1000 * 15;
 
 const { t } = useI18n();
 const connectionStore = useConnectionStore();
+const { resetShareState } = useSessionAdapter();
 
 const drawerTabs = [
   {
     name: 'general',
     label: t('General'),
     icon: KeyboardIcon,
-    component: Keyboard,
+    component: General,
   },
   {
     name: 'file-manager',
@@ -151,12 +153,25 @@ onMounted(() => {
   });
 
   const initialDisbaleFileManager = lunaCommunicator.getDisbaleFileManager();
+
   if (initialDisbaleFileManager) {
     isDisableFileManager.value = initialDisbaleFileManager;
   }
 
   mittBus.on('open-setting', () => {
     drawerStatus.value = !drawerStatus.value;
+  });
+
+  mittBus.on('close-drawer', () => {
+    drawerStatus.value = false;
+
+    nextTick(() => {
+      resetShareState();
+    });
+  });
+
+  mittBus.on('file-manager-expired', () => {
+    showEmpty.value = true;
   });
 });
 
@@ -166,6 +181,7 @@ onUnmounted(() => {
     timeoutId.value = null;
   }
 
+  mittBus.off('close-drawer');
   lunaCommunicator.offLuna(LUNA_MESSAGE_TYPE.OPEN, handleOpenDrawer);
   lunaCommunicator.offLuna(LUNA_MESSAGE_TYPE.GET_FILE_CONNECT_TOKEN, handleCreateFileConnectToken);
   lunaCommunicator.offLuna(LUNA_MESSAGE_TYPE.PING);
@@ -179,14 +195,15 @@ onUnmounted(() => {
     placement="right"
     :show="true"
     :show-mask="false"
-    :default-width="502"
-    :min-width="502"
+    :default-width="600"
+    :min-width="600"
     :max-width="800"
     class="relative"
     :style="{
       display: drawerStatus ? 'block' : 'none',
       opacity: drawerStatus ? 1 : 0,
       top: '1px',
+      bottom: '1px',
     }"
   >
     <n-drawer-content :native-scrollbar="false">
@@ -199,23 +216,31 @@ onUnmounted(() => {
         </n-flex>
       </template>
 
-      <n-tabs size="medium" type="line" :default-value="filteredDrawerTabs[0].name" @update:value="handleTabChange">
-        <n-tab-pane v-for="tab in filteredDrawerTabs" :key="tab.name" display-directive="show" :name="tab.name">
-          <template #tab>
-            <n-flex align="center">
-              <component :is="tab.icon" :size="16" />
-              <span>{{ tab.label }}</span>
-            </n-flex>
-          </template>
+      <n-card bordered>
+        <n-tabs
+          animated
+          size="medium"
+          type="segment"
+          :default-value="filteredDrawerTabs[0].name"
+          @update:value="handleTabChange"
+        >
+          <n-tab-pane v-for="tab in filteredDrawerTabs" :key="tab.name" display-directive="show" :name="tab.name">
+            <template #tab>
+              <n-flex align="center">
+                <component :is="tab.icon" :size="16" />
+                <span>{{ tab.label }}</span>
+              </n-flex>
+            </template>
 
-          <component
-            :is="tab.component"
-            :sftp-token="fileManagerToken"
-            :show-empty="showEmpty"
-            @reconnect="handleReconnect"
-          />
-        </n-tab-pane>
-      </n-tabs>
+            <component
+              :is="tab.component"
+              :sftp-token="fileManagerToken"
+              :show-empty="showEmpty"
+              @reconnect="handleReconnect"
+            />
+          </n-tab-pane>
+        </n-tabs>
+      </n-card>
     </n-drawer-content>
   </n-drawer>
 </template>

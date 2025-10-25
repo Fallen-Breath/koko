@@ -11,6 +11,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { BrandDocker } from '@vicons/tabler';
 import { Box, Folder } from 'lucide-vue-next';
 import { readText } from 'clipboard-polyfill';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { SearchAddon } from '@xterm/addon-search';
 import { createDiscreteApi, darkTheme, NIcon } from 'naive-ui';
 
@@ -25,6 +26,7 @@ import { useTreeStore } from '@/store/modules/tree.ts';
 import { formatMessage, preprocessInput } from '@/utils';
 import { useParamsStore } from '@/store/modules/params.ts';
 import { useTerminalStore } from '@/store/modules/terminal.ts';
+import { LUNA_MESSAGE_TYPE } from '@/types/modules/message.type';
 import { useKubernetesStore } from '@/store/modules/kubernetes.ts';
 
 import { base64ToUint8Array, generateWsURL } from './helper';
@@ -274,6 +276,7 @@ export function handleTreeMessage(ws: WebSocket, event: MessageEvent) {
     case 'CLOSE':
     case 'ERROR': {
       ws.close();
+      mittBus.emit('connect-error');
       break;
     }
     case 'CONNECT': {
@@ -466,8 +469,22 @@ export function handleTerminalMessage(ws: WebSocket, event: MessageEvent, create
   if (info.type === 'TERMINAL_SHARE') {
     const data = JSON.parse(info.data);
 
-    paramsStore.setShareId(data.share_id);
-    paramsStore.setShareCode(data.code);
+    const currentTab = terminalStore.currentTab;
+    const currentNode = treeStore.getTerminalByK8sId(currentTab);
+
+    if (currentNode) {
+      // 为当前节点添加分享状态映射
+      if (!currentNode.shareIdMap) {
+        currentNode.shareIdMap = new Map();
+      }
+      if (!currentNode.shareCodeMap) {
+        currentNode.shareCodeMap = new Map();
+      }
+
+      currentNode.shareIdMap.set(currentTab, data.share_id);
+      currentNode.shareCodeMap.set(currentTab, data.code);
+      treeStore.setK8sIdMap(currentTab, { ...currentNode });
+    }
   }
 }
 
@@ -516,11 +533,13 @@ export function initTerminalEvent(
   nodeInfo: any
 ) {
   const fitAddon: FitAddon = new FitAddon();
+  const webglAddon: WebglAddon = new WebglAddon();
   const searchAddon: SearchAddon = new SearchAddon();
 
   const terminalStore = useTerminalStore();
 
   terminal.loadAddon(fitAddon);
+  terminal.loadAddon(webglAddon);
   terminal.loadAddon(searchAddon);
 
   terminal.open(el);
@@ -547,6 +566,14 @@ export function initTerminalEvent(
   terminal.onData((data: string) => {
     const kubernetesStore = useKubernetesStore();
     const terminalStore = useTerminalStore();
+    const treeStore = useTreeStore();
+
+    const currentK8sId = terminalStore.currentTab;
+    const currentNode = treeStore.getTerminalByK8sId(currentK8sId);
+
+    if (!currentNode) {
+      return;
+    }
 
     kubernetesStore.setLastSendTime(new Date());
 
@@ -561,15 +588,16 @@ export function initTerminalEvent(
 
     const messageBody = {
       data: inputMessage,
-      id: nodeInfo.id,
-      pod: nodeInfo.pod || '',
-      k8s_id: nodeInfo.k8s_id,
-      namespace: nodeInfo.namespace || '',
-      container: nodeInfo.container || '',
+      id: currentNode.id,
+      pod: currentNode.pod || '',
+      k8s_id: currentK8sId,
+      namespace: currentNode.namespace || '',
+      container: currentNode.container || '',
       type: 'TERMINAL_K8S_DATA',
     };
 
     socket.send(JSON.stringify(messageBody));
+    lunaCommunicator.sendLuna(LUNA_MESSAGE_TYPE.INPUT_ACTIVE, '');
   });
 
   terminal.onSelectionChange(() => {
@@ -651,6 +679,15 @@ export function initElEvent(
     },
     false
   );
+
+  el.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'f') {
+        mittBus.emit('open-search');
+        e.preventDefault();
+      }
+    }
+  });
 }
 
 /**
@@ -769,7 +806,10 @@ export function createTerminal(el: HTMLElement, socket: WebSocket, lunaConfig: I
   initCustomWindowEvent(fitAddon);
   initMittBusEvents(searchAddon, socket);
 
-  return terminal;
+  return {
+    terminal,
+    searchAddon,
+  };
 }
 
 export function useKubernetes(t: any) {

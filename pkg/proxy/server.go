@@ -238,6 +238,7 @@ func (s *Server) GetFilterParser() *Parser {
 	platform := s.connOpts.authInfo.Platform
 	// 过滤规则排序
 	sort.Sort(model.CommandACLs(filterRules))
+	pty := s.UserConn.Pty()
 	parser := Parser{
 		id:             s.ID,
 		protocolType:   protocol,
@@ -249,7 +250,7 @@ func (s *Server) GetFilterParser() *Parser {
 		i18nLang:       s.connOpts.i18nLang,
 		platform:       &platform,
 	}
-	parser.initial()
+	parser.initial(pty.Window.Width, pty.Window.Height)
 	return &parser
 }
 
@@ -514,9 +515,15 @@ func (s *Server) getRedisConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.Re
 	}
 	username := s.account.Username
 	isAuthUsername := false
-	if platfromProtocol, ok := platform.GetProtocolSetting("redis"); ok {
-		protocolSetting := platfromProtocol.GetSetting()
+	isClusterMode := false
+	if platformProtocol, ok := platform.GetProtocolSetting("redis"); ok {
+		protocolSetting := platformProtocol.GetSetting()
 		isAuthUsername = protocolSetting.AuthUsername
+
+		// 解析集群模式配置 TODO: 将优化 sdk-go 的 ProtocolSetting 加上 enable_cluster_mode
+		if useCluster, exists := platformProtocol.Setting["enable_cluster_mode"]; exists {
+			isClusterMode = parseBoolValue(useCluster)
+		}
 	}
 	if s.account.IsNull() || !isAuthUsername {
 		username = ""
@@ -526,6 +533,7 @@ func (s *Server) getRedisConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.Re
 		srvconn.SqlPort(port),
 		srvconn.SqlUsername(username),
 		srvconn.SqlPassword(s.account.Secret),
+		srvconn.SqlClusterMode(isClusterMode),
 		srvconn.SqlDBName(asset.SpecInfo.DBName),
 		srvconn.SqlUseSSL(asset.SpecInfo.UseSSL),
 		srvconn.SqlCaCert(asset.SecretInfo.CaCert),
@@ -552,8 +560,8 @@ func (s *Server) getMongoDBConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.
 
 	authSource := ""
 	connectionOpts := ""
-	if platfromProtocol, ok := platform.GetProtocolSetting("mongodb"); ok {
-		protocolSetting := platfromProtocol.GetSetting()
+	if platformProtocol, ok := platform.GetProtocolSetting("mongodb"); ok {
+		protocolSetting := platformProtocol.GetSetting()
 		authSource = protocolSetting.AuthSource
 		connectionOpts = protocolSetting.ConnectionOpts
 	}
@@ -601,7 +609,7 @@ func (s *Server) getSSHConnPlus(suppressConnectionMsgFlag *atomic.Bool) (srvConn
 			sshAuthOpts = append(sshAuthOpts, srvconn.SSHClientPrivateAuth(signer))
 		}
 	} else {
-		if !isPlatform(&platform, "MFA") {
+		if !isPlatform(&platform, mfaAuth) {
 			sshAuthOpts = append(sshAuthOpts, srvconn.SSHClientPassword(loginAccount.Secret))
 		}
 	}
@@ -616,7 +624,7 @@ func (s *Server) getSSHConnPlus(suppressConnectionMsgFlag *atomic.Bool) (srvConn
 		for i := range questions {
 			q := questions[i]
 			vt.SetPrompt(questions[i])
-			logger.Debugf("Conn[%s] keyboard auth question [ %s ]", s.UserConn.ID(), q)
+			logger.Debugf("Conn[%s] keyboard auth question %d [ %s ]", s.UserConn.ID(), i, q)
 			if strings.Contains(strings.ToLower(q), "password") {
 				if password != "" {
 					ans[i] = password
@@ -734,8 +742,8 @@ func (s *Server) getTelnetConn() (srvConn *srvconn.TelnetConnection, err error) 
 	usernamePrompt := ""
 	passwordPrompt := ""
 	successPrompt := ""
-	if platfromProtocol, ok := platform.GetProtocolSetting(protocol); ok {
-		protocolSetting := platfromProtocol.GetSetting()
+	if platformProtocol, ok := platform.GetProtocolSetting(protocol); ok {
+		protocolSetting := platformProtocol.GetSetting()
 		usernamePrompt = strings.TrimSpace(protocolSetting.TelnetUsernamePrompt)
 		passwordPrompt = strings.TrimSpace(protocolSetting.TelnetPasswordPrompt)
 		successPrompt = strings.TrimSpace(protocolSetting.TelnetSuccessPrompt)

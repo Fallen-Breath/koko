@@ -23,12 +23,15 @@ type TerminalEvents = Record<string, any> & {
 };
 
 interface TerminalContext {
-  eventBus: ReturnType<typeof mitt<TerminalEvents>>;
   lunaCommunicator: typeof lunaCommunicator;
-  sendLunaEvent: (event: string, data: any) => void;
-  initializeLunaListeners: () => void;
-  initialize: () => void;
+  eventBus: ReturnType<typeof mitt<TerminalEvents>>;
+
   cleanup: () => void;
+  initialize: () => void;
+  initializeLunaListeners: () => void;
+  sendMittEvent: (event: string, data: any) => void;
+  onMittEvent: (event: string, callback: (data: any) => void) => () => void;
+  sendLunaEvent: (event: string, data: any) => void;
 }
 
 // 创建注入键
@@ -128,6 +131,15 @@ export const createTerminalContext = (): TerminalContext => {
       socket.send(formatMessage(terminalId, FORMATTER_MESSAGE_TYPE.TERMINAL_DATA, msg.data));
     };
 
+    const handInputActive = (_data: string) => {
+      const msg = {
+        id: '',
+        origin: '',
+        data: '',
+      } as LunaMessage;
+      handLunaCommand(msg);
+    };
+
     const handLunaFocus = (_msg: LunaMessage) => {
       const terminal = connectionStore.terminal;
 
@@ -180,6 +192,17 @@ export const createTerminalContext = (): TerminalContext => {
     lunaCommunicator.onLuna(LUNA_MESSAGE_TYPE.FOCUS, handLunaFocus);
     lunaCommunicator.onLuna(LUNA_MESSAGE_TYPE.TERMINAL_THEME_CHANGE, handLunaThemeChange);
     lunaCommunicator.onLuna(LUNA_MESSAGE_TYPE.TERMINAL_CONTENT, handTerminalContent);
+    lunaCommunicator.onLuna(LUNA_MESSAGE_TYPE.INPUT_ACTIVE, handInputActive);
+  };
+
+  const sendMittEvent = (event: string, data: any) => {
+    mittBus.emit(event as any, data);
+  };
+
+  const onMittEvent = (event: string, callback: (data: any) => void) => {
+    mittBus.on(event as any, callback);
+
+    return () => mittBus.off(event as any, callback);
   };
 
   const initialize = () => {
@@ -195,10 +218,13 @@ export const createTerminalContext = (): TerminalContext => {
   return {
     eventBus,
     lunaCommunicator,
-    sendLunaEvent,
-    initializeLunaListeners,
-    initialize,
+
     cleanup,
+    initialize,
+    sendLunaEvent,
+    sendMittEvent,
+    onMittEvent,
+    initializeLunaListeners,
   };
 };
 
