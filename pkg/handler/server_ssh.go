@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gliderlabs/ssh"
@@ -315,13 +317,32 @@ func (s *Server) proxyTokenInfo(sess ssh.Session, tokenInfo *model.ConnectToken)
 	if tokenInfo.Gateway != nil {
 		gateways = []model.Gateway{*tokenInfo.Gateway}
 	}
+	enableReused := config.GetConf().ReuseConnection
+	reusedKey := GenerateSSHTokenResueKey(tokenInfo)
 
-	sshAuthOpts := buildSSHClientOptions(&asset, &account, gateways)
-	sshClient, err := srvconn.NewSSHClient(sshAuthOpts...)
-	if err != nil {
-		logger.Errorf("Get SSH Client failed: %s", err)
-		utils.IgnoreErrWriteString(sess, err.Error())
-		return
+	var (
+		sshClient *srvconn.SSHClient
+		ok1       bool
+		err1      error
+	)
+	if enableReused {
+		sshClient, ok1 = srvconn.GetClientFromCache(reusedKey)
+		if ok1 {
+			logger.Infof("reused ssh client: %s", sshClient)
+		}
+	}
+	if sshClient == nil {
+		sshAuthOpts := buildSSHClientOptions(&asset, &account, gateways)
+		// add Reuse ssh client
+		sshClient, err1 = srvconn.NewSSHClient(sshAuthOpts...)
+		if err1 != nil {
+			logger.Errorf("Get SSH Client failed: %s", err1)
+			utils.IgnoreErrWriteString(sess, err1.Error())
+			return
+		}
+		if enableReused {
+			srvconn.AddClientCache(reusedKey, sshClient)
+		}
 	}
 	//defer sshClient.Close()
 	vsReq := &vscodeReq{
@@ -336,7 +357,11 @@ func (s *Server) proxyTokenInfo(sess ssh.Session, tokenInfo *model.ConnectToken)
 		s.addVSCodeReq(vsReq)
 		defer s.deleteVSCodeReq(vsReq)
 		<-sess.Context().Done()
-		_ = sshClient.Close()
+		if sshClient.KeyId != "" {
+			srvconn.ReleaseClientCacheKey(sshClient.KeyId, sshClient)
+		} else {
+			_ = sshClient.Close()
+		}
 		logger.Infof("User %s end vscode request %s", vsReq.user, sshClient)
 	}()
 	if len(sess.Command()) != 0 {
@@ -349,7 +374,7 @@ func (s *Server) proxyTokenInfo(sess ssh.Session, tokenInfo *model.ConnectToken)
 		return
 	}
 
-	if err = s.proxyVscodeShell(sess, vsReq, sshClient, tokenInfo); err != nil {
+	if err := s.proxyVscodeShell(sess, vsReq, sshClient, tokenInfo); err != nil {
 		utils.IgnoreErrWriteString(sess, err.Error())
 	}
 }
@@ -390,6 +415,7 @@ func (s *Server) proxyAssetCommand(sess ssh.Session, sshClient *srvconn.SSHClien
 
 	// todo: 暂且不支持 acl 工单
 	acls := tokenInfo.CommandFilterACLs
+	sort.Sort(model.CommandACLs(acls))
 	for i := range acls {
 		acl := acls[i]
 		_, action, _ := acl.Match(rawStr)
@@ -403,6 +429,10 @@ func (s *Server) proxyAssetCommand(sess ssh.Session, sshClient *srvconn.SSHClien
 			logger.Errorf("ACL reject execute %s ", rawStr)
 			return
 		default:
+		}
+		if action == model.ActionAccept {
+			logger.Debugf("ACL accept execute %s ", rawStr)
+			break
 		}
 	}
 
@@ -458,7 +488,7 @@ func (s *Server) proxyAssetCommand(sess ssh.Session, sshClient *srvconn.SSHClien
 
 	// to fix this issue: https://github.com/ploxiln/fab-classic/issues/46
 	// make pty for client when client required or command is login shell
-	if pty, _, isPty := sess.Pty(); isPty ||
+	if pty, _, isPty := sess.Pty(); isPty &&
 		(strings.Contains(rawStr, "bash --login") || strings.Contains(rawStr, "bash -l")) {
 		_ = goSess.RequestPty(
 			pty.Term,
@@ -483,45 +513,24 @@ func (s *Server) proxyAssetCommand(sess ssh.Session, sshClient *srvconn.SSHClien
 		logger.Errorf("Get SSH session stderr failed: %s", err)
 		return
 	}
-	reader := io.MultiReader(out, errOut)
+	stderrWriter := sess.Stderr()
+	recordBuf := utils.NewMaxSizeBuffer(1024)
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
-		now := time.Now()
-		var outResult strings.Builder
-		maxSize := 1024
-		cmd := model.Command{
-			SessionID:   respSession.ID,
-			OrgID:       respSession.OrgID,
-			Input:       rawStr,
-			User:        respSession.User,
-			Server:      respSession.Asset,
-			Account:     respSession.Account,
-			Timestamp:   now.Unix(),
-			DateCreated: now,
-		}
-		buf := make([]byte, 1024)
-		for {
-			n, err1 := reader.Read(buf)
-			if err1 != nil {
-				if err1 != io.EOF {
-					logger.Errorf("Read ssh session output failed: %s", err)
-				} else {
-					logger.Info("Read ssh command session output end")
-				}
-				break
-			}
-			_, _ = sess.Write(buf[:n])
-			maxSize -= n
-			if maxSize >= 0 {
-				_, _ = outResult.Write(buf[:n])
-			}
-		}
-		cmd.Output = strings.ReplaceAll(outResult.String(), "\x00", "")
-		termCfg := s.GetTerminalConfig()
-		cmdStorage := proxy.NewCommandStorage(s.jmsService, &termCfg)
-		if err2 := cmdStorage.BulkSave([]*model.Command{&cmd}); err2 != nil {
-			logger.Errorf("Create command err: %s", err2)
-		}
+		defer wg.Done()
+		outRecorderWriter := io.MultiWriter(sess, recordBuf)
+		_, _ = io.Copy(outRecorderWriter, out)
+		logger.Debugf("User %s finished session stdout", tokenInfo.User.String())
 	}()
+
+	go func() {
+		defer wg.Done()
+		errRecorderWriter := io.MultiWriter(stderrWriter, recordBuf)
+		_, _ = io.Copy(errRecorderWriter, errOut)
+		logger.Debugf("User %s finished session stderr", tokenInfo.User.String())
+	}()
+	now := time.Now()
 	err = goSess.Run(rawStr)
 	if err != nil {
 		logger.Errorf("User %s Run command %s failed: %s",
@@ -533,6 +542,24 @@ func (s *Server) proxyAssetCommand(sess ssh.Session, sshClient *srvconn.SSHClien
 				logger.Errorf("Create sess exit code %d err: %s", exitCode, err1)
 			}
 		}
+	}
+	wg.Wait()
+	cmd := model.Command{
+		SessionID:   respSession.ID,
+		OrgID:       respSession.OrgID,
+		Input:       rawStr,
+		User:        respSession.User,
+		Server:      respSession.Asset,
+		Account:     respSession.Account,
+		Timestamp:   now.Unix(),
+		DateCreated: now,
+	}
+	outResult := recordBuf.String()
+	cmd.Output = strings.ReplaceAll(outResult, "\x00", "")
+	termCfg := s.GetTerminalConfig()
+	cmdStorage := proxy.NewCommandStorage(s.jmsService, &termCfg)
+	if err2 := cmdStorage.BulkSave([]*model.Command{&cmd}); err2 != nil {
+		logger.Errorf("Create command err: %s", err2)
 	}
 	reason := string(model.ReasonErrConnectDisconnect)
 	s.recordSessionLifecycle(respSession.ID, model.AssetConnectFinished, reason)
@@ -785,10 +812,32 @@ func (s *Server) buildSSHClient(tokenInfo *model.ConnectToken) (*srvconn.SSHClie
 		gateways = []model.Gateway{*tokenInfo.Gateway}
 	}
 	sshAuthOpts := buildSSHClientOptions(&asset, &account, gateways)
+	// add reuse ssh client
+	enableReused := config.GetConf().ReuseConnection
+	reusedKey := GenerateSSHTokenResueKey(tokenInfo)
+	if enableReused {
+		if client, ok := srvconn.GetClientFromCache(reusedKey); ok {
+			logger.Infof("Reused ssh client key: %s", reusedKey)
+			return client, nil
+		}
+	}
 	sshClient, err := srvconn.NewSSHClient(sshAuthOpts...)
 	if err != nil {
 		logger.Errorf("Get SSH Client failed: %s", err)
 		return sshClient, err
 	}
+	if enableReused {
+		srvconn.AddClientCache(reusedKey, sshClient)
+	}
 	return sshClient, nil
+}
+
+func GenerateSSHTokenResueKey(tokenInfo *model.ConnectToken) string {
+	userId := tokenInfo.User.ID
+	assetId := tokenInfo.Asset.ID
+	ip := tokenInfo.Asset.Address
+	port := tokenInfo.Asset.ProtocolPort("ssh")
+	accountUsername := tokenInfo.Account.Username
+	return fmt.Sprintf("SSHD_%s_%s_%s_%d_%s",
+		userId, assetId, ip, port, accountUsername)
 }
