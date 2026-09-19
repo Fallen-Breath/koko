@@ -162,8 +162,9 @@ type Server struct {
 }
 
 type SessionInfo struct {
-	Session *model.Session    `json:"session"`
-	Perms   *model.Permission `json:"permission"`
+	Session         *model.Session         `json:"session"`
+	Perms           *model.Permission      `json:"permission"`
+	ClipboardPolicy *model.ClipboardPolicy `json:"clipboard_policy,omitempty"`
 
 	BackspaceAsCtrlH *bool `json:"backspaceAsCtrlH,omitempty"`
 	CtrlCAsCtrlZ     bool  `json:"ctrlCAsCtrlZ"`
@@ -452,6 +453,12 @@ func (s *Server) createAvailableGateWay() (*domainGateway, error) {
 	return dGateway, nil
 }
 
+func (s *Server) createAvailableHTTPGateWay() *domainHTTP {
+	return &domainHTTP{
+		selectedGateway: s.gateway,
+	}
+}
+
 // getSSHConn 获取ssh连接
 func (s *Server) getK8sConConn(localTunnelAddr *net.TCPAddr) (srvConn srvconn.ServerConnection, err error) {
 	namespaceValue := ""
@@ -561,18 +568,18 @@ func (s *Server) getMongoDBConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.
 	protocol := s.connOpts.authInfo.Protocol
 	host := asset.Address
 	port := asset.ProtocolPort(protocol)
-	if localTunnelAddr != nil {
-		host = localIP
-		port = localTunnelAddr.Port
-	}
 	platform := s.connOpts.authInfo.Platform
 
 	authSource := ""
 	connectionOpts := ""
+	proxyURL := ""
 	if platformProtocol, ok := platform.GetProtocolSetting("mongodb"); ok {
 		protocolSetting := platformProtocol.GetSetting()
 		authSource = protocolSetting.AuthSource
 		connectionOpts = protocolSetting.ConnectionOpts
+	}
+	if localTunnelAddr != nil {
+		proxyURL = fmt.Sprintf("http://%s", localTunnelAddr.String())
 	}
 
 	srvConn, err = srvconn.NewMongoDBConnection(
@@ -587,6 +594,7 @@ func (s *Server) getMongoDBConn(localTunnelAddr *net.TCPAddr) (srvConn *srvconn.
 		srvconn.SqlAllowInvalidCert(asset.SpecInfo.AllowInvalidCert),
 		srvconn.SqlAuthSource(authSource),
 		srvconn.SqlConnectionOptions(connectionOpts),
+		srvconn.SqlProxyURL(proxyURL),
 		srvconn.SqlPtyWin(srvconn.Windows{
 			Width:  s.UserConn.Pty().Window.Width,
 			Height: s.UserConn.Pty().Window.Height,
@@ -694,10 +702,14 @@ func (s *Server) getSSHConnPlus(suppressConnectionMsgFlag *atomic.Bool) (srvConn
 			account 是最终 su 的登录用户
 		*/
 		suUsername := s.account.Username
-		suPassword := s.account.Secret
 		sudoType := srvconn.SuMethodSu
 		if platform.SuMethod != nil {
 			sudoType = srvconn.NewSuMethodType(platform.SuMethod.Value)
+		}
+		suPassword := s.account.Secret
+		if sudoType.IsSudo() {
+			// sudo authenticates the invoking user by default.
+			suPassword = s.suFromAccount.Secret
 		}
 		cfg := srvconn.SuConfig{
 			MethodType:   sudoType,
@@ -804,10 +816,14 @@ func (s *Server) getTelnetConn() (srvConn *srvconn.TelnetConnection, err error) 
 	}
 	if s.suFromAccount != nil {
 		suUsername := s.account.Username
-		suPassword := s.account.Secret
 		sudoType := srvconn.SuMethodSu
 		if platform.SuMethod != nil {
 			sudoType = srvconn.NewSuMethodType(platform.SuMethod.Value)
+		}
+		suPassword := s.account.Secret
+		if sudoType.IsSudo() {
+			// sudo authenticates the invoking user by default.
+			suPassword = s.suFromAccount.Secret
 		}
 		cfg := srvconn.SuConfig{
 			MethodType:   sudoType,
@@ -1041,6 +1057,18 @@ func (s *Server) Proxy() {
 		switch protocol {
 		case srvconn.ProtocolSSH, srvconn.ProtocolTELNET:
 			// ssh 和 telnet 协议不需要本地启动代理
+		case srvconn.ProtocolMongoDB:
+			dHTTP := s.createAvailableHTTPGateWay()
+			err := dHTTP.Start()
+			if err != nil {
+				msg := lang.T("Start domain gateway failed %s")
+				msg = fmt.Sprintf(msg, err)
+				utils.IgnoreErrWriteString(s.UserConn, utils.WrapperWarn(msg))
+				logger.Error(msg)
+				return
+			}
+			defer dHTTP.Stop()
+			proxyAddr = dHTTP.GetListenAddr()
 		default:
 			dGateway, err := s.createAvailableGateWay()
 			if err != nil {
@@ -1094,8 +1122,9 @@ func (s *Server) Proxy() {
 		}
 		perm := actions.Permission()
 		info := SessionInfo{
-			Session: s.sessionInfo,
-			Perms:   &perm,
+			Session:         s.sessionInfo,
+			Perms:           &perm,
+			ClipboardPolicy: s.connOpts.authInfo.ClipboardPolicy,
 
 			BackspaceAsCtrlH: tokenConnOpts.BackspaceAsCtrlH,
 			CtrlCAsCtrlZ:     ctrlCAsCtrlZ,
@@ -1112,24 +1141,36 @@ func (s *Server) Proxy() {
 func (s *Server) sendConnectErrorMsg(err error) {
 	msg := fmt.Sprintf("%s error: %s", s.connOpts.ConnectMsg(),
 		s.ConvertErrorToReadableMsg(err))
+
 	utils.IgnoreErrWriteString(s.UserConn, msg)
 	utils.IgnoreErrWriteString(s.UserConn, utils.CharNewLine)
 	logger.Error(msg)
+
 	protocol := s.connOpts.authInfo.Protocol
-	password := s.account.Secret
-	if password != "" {
-		passwordLen := len(s.account.Secret)
-		showLen := passwordLen / 2
-		hiddenLen := passwordLen - showLen
-		var msg2 string
-		if protocol == srvconn.ProtocolK8s {
-			msg2 = fmt.Sprintf("Try token: %s", password[:showLen]+strings.Repeat("*", hiddenLen))
-		} else {
-			msg2 = fmt.Sprintf("Try password: %s", password[:showLen]+strings.Repeat("*", hiddenLen))
-		}
-		logger.Error(msg2)
+	credentialType := "password"
+
+	if protocol == srvconn.ProtocolK8s {
+		credentialType = "k8s_token"
+	} else if s.account.IsSSHKey() {
+		credentialType = "ssh_key"
 	}
 
+	credentialPresent := s.account.Secret != ""
+	summary := fmt.Sprintf(
+		"Conn[%s] authentication credential summary: type=%s present=%t",
+		s.UserConn.ID(), credentialType, credentialPresent,
+	)
+
+	if credentialType == "ssh_key" && credentialPresent {
+		if signer, parseErr := gossh.ParsePrivateKey([]byte(s.account.Secret)); parseErr == nil {
+			summary += fmt.Sprintf(
+				" fingerprint=%s",
+				gossh.FingerprintSHA256(signer.PublicKey()),
+			)
+		}
+	}
+
+	logger.Error(summary)
 }
 
 func ParseUrlHostAndPort(clusterAddr string) (host string, port int, err error) {

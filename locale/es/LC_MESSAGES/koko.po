@@ -585,6 +585,11 @@ msgstr "Terminado por el administrador %s"
 
 #. lang.T
 #: pkg/proxy/tools.go:28
+msgid "Deployment permission denied"
+msgstr "Permisos de implementación insuficientes"
+
+#. lang.T
+#: pkg/proxy/tools.go:31
 msgid "Authentication failed"
 msgstr "Autenticación fallida"
 
@@ -607,3 +612,8 @@ msgstr "No hay ruta al host"
 #: pkg/proxy/tools.go:40
 msgid "network is unreachable"
 msgstr "Red inalcanzable"
+
+#. lang.T
+#: pkg/proxy/parser.go
+msgid "File exceeds maximum transfer size: %s"
+msgstr "El archivo supera el tamaño máximo de transferencia: %s"

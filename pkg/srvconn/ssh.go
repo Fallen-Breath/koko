@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jumpserver/koko/pkg/common"
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/jumpserver/koko/pkg/logger"
@@ -212,7 +213,7 @@ func NewSSHClientWithCfg(userConn io.ReadWriter, hostKeyCallbackCallGuard sshhos
 		User:            cfg.Username,
 		Auth:            cfg.AuthMethods(),
 		Timeout:         time.Duration(cfg.Timeout) * time.Second,
-		HostKeyCallback: sshhostkey.CreateHostKeyCallback(userConn, hostKeyCallbackCallGuard), // fallen's fork: check ssh host key -- replace HostKeyCallback
+		HostKeyCallback: sshhostkey.CreateHostKeyCallback(userConn, hostKeyCallbackCallGuard), // fallen's fork: check ssh host key -- replace dummy common.NewTrustHostKeyCallback()
 		Config:          createSSHConfig(),
 
 		HostKeyAlgorithms: allHostKeyAlgorithms(),

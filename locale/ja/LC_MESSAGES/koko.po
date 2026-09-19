@@ -578,6 +578,11 @@ msgstr "%s管理者が接続を終了"
 
 #. lang.T
 #: pkg/proxy/tools.go:28
+msgid "Deployment permission denied"
+msgstr "デプロイ権限が不足しています"
+
+#. lang.T
+#: pkg/proxy/tools.go:31
 msgid "Authentication failed"
 msgstr "認証に失敗しました(ユーザー名またはパスワードエラー)"
 
@@ -600,3 +605,8 @@ msgstr "ネットワーク不通(ルーティング不通)"
 #: pkg/proxy/tools.go:40
 msgid "network is unreachable"
 msgstr "ネットワーク不通（ネットワーク不可）"
+
+#. lang.T
+#: pkg/proxy/parser.go
+msgid "File exceeds maximum transfer size: %s"
+msgstr "ファイルが最大転送サイズを超えています: %s"

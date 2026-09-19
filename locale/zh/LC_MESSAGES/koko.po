@@ -563,6 +563,11 @@ msgstr "%s 管理员终断连接"
 
 #. lang.T
 #: pkg/proxy/tools.go:28
+msgid "Deployment permission denied"
+msgstr "部署权限不足"
+
+#. lang.T
+#: pkg/proxy/tools.go:31
 msgid "Authentication failed"
 msgstr "认证失败（用户名或密码错误）"
 
@@ -585,3 +590,8 @@ msgstr "网络不通（路由不通）"
 #: pkg/proxy/tools.go:40
 msgid "network is unreachable"
 msgstr "网络不通（网络不可达）"
+
+#. lang.T
+#: pkg/proxy/parser.go
+msgid "File exceeds maximum transfer size: %s"
+msgstr "文件超过最大传输大小：%s"
